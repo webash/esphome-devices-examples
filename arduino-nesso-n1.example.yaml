@@ -79,8 +79,9 @@ pi4ioe5v6408:
     i2c_id: component_i2c0
 
 i2c_device:
-  - id: charge_controller
-    address: 0x55
+  # does nothing right now, but this is where the AW32001E charge controller is
+  - id: component_charge_controller
+    address: 0x49
     i2c_id: component_i2c0
 
 output:
@@ -139,6 +140,7 @@ binary_sensor:
 
 sensor:
   - platform: bq27220
+    # on address: 0x55
     voltage:
       name: "Battery Voltage"
       id: component_batt_voltage
