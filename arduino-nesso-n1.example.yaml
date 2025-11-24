@@ -1,0 +1,304 @@
+esphome:
+  name: ${device_name}
+  friendly_name: ${device_name}
+  project: 
+    name: agn.remote
+    version: "0.1"
+
+substitutions:
+  device_name: esphome-n1-00
+
+
+esp32:
+  board: esp32-c6-devkitc-1
+  framework:
+    type: esp-idf
+
+external_components:
+# wants the Arduino framework, which doesn't work on esp32-c6
+#   - source: github://GeeDeePeeTee/esphome-bq27220
+#     components: [bq27220]
+
+# my modified version of the above component swapping in esphome libraries
+  - source: 
+      type: git
+      url: https://github.com/webash/esphome-bq27220
+      ref: convertto-esphome-libraries
+    components: [bq27220]
+    refresh: 120s
+    
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "${device_name} Fallback Hotspot"
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  auth: 
+    username: !secret web_server_username
+    password: !secret web_server_password
+
+i2c:
+  - id: component_i2c0
+    scl: GPIO8
+    sda: GPIO10
+
+spi:
+  - id: component_spi0
+    type: single
+    mosi_pin: GPIO21
+    clk_pin: GPIO20
+  
+pi4ioe5v6408:
+  # Buttons and LoRa control
+  - id: component_expander_p0
+    address: 0x43
+    i2c_id: component_i2c0
+  # Power/UI: LCD reset, LCD backlight, GROVE power, VIN detect, LED
+  - id: component_expander_p1
+    address: 0x44
+    i2c_id: component_i2c0
+
+i2c_device:
+  - id: charge_controller
+    address: 0x55
+    i2c_id: component_i2c0
+
+output:
+  - platform: gpio # couldn't get ledc to work for pwm, because of the expander
+    id: component_output_light_lcd_gpio
+    pin:
+      pi4ioe5v6408: component_expander_p1
+      number: 6
+      mode:
+        output: true
+  - id: component_output_buzzer
+    platform: ledc
+    pin: GPIO11
+
+binary_sensor:
+  - id: component_button_front
+    platform: gpio
+    pin:
+      pi4ioe5v6408: component_expander_p0
+      number: 0
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    on_press: 
+      while:
+        condition:
+          binary_sensor.is_on: component_button_front
+        then:
+        - output.turn_on: component_output_buzzer
+        - output.ledc.set_frequency:
+            id: component_output_buzzer
+            frequency: "1000Hz"
+        - output.set_level:
+            id: component_output_buzzer
+            level: 50%
+        - delay: 0.5s
+        - output.ledc.set_frequency:
+            id: component_output_buzzer
+            frequency: "500Hz"
+        - output.set_level:
+            id: component_output_buzzer
+            level: 100%
+  - id: component_button_side
+    platform: gpio
+    pin:
+      pi4ioe5v6408: component_expander_p0
+      number: 1
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    on_press: 
+      then:
+        - output.turn_off: component_output_buzzer
+
+sensor:
+  - platform: bq27220
+    voltage:
+      name: "Battery Voltage"
+      id: component_batt_voltage
+    current:
+      name: "Battery Current"
+      id: component_batt_current
+    soc:
+      name: "Battery SOC"
+      id: component_batt_soc
+    remaining_capacity:
+      name: "Battery Remaining Capacity"
+      id: component_batt_remaining_capacity
+    temperature:
+      name: "Battery Temperature"
+      id: component_batt_temperature
+    full_charge_capacity:
+      name: "Battery Full Charge Capacity"
+      id: component_batt_full_charge_capacity
+    design_capacity:
+      name: "Battery Design Capacity"
+      id: component_batt_design_capacity
+    state_of_health:
+      name: "Battery State of Health"
+      id: component_batt_soh
+    device_number:
+      name: "Battery Device ID"
+      id: component_bq27220_battery_device_id
+  # Watch this component or modify it myself to get the BMI270 on its own:
+  # https://github.com/DennisGaida/m5stack-atoms3r-components/blob/main/components/bmi270_bmm150/bmi270_bmm150.cpp
+  # https://github.com/esphome/feature-requests/issues/3052
+
+light:
+  # can't get monochromatic light with PWM working due to the expander; esphome doesn't want
+  # - platform: monochromatic
+  #   id: component_light_lcd
+  #   name: LCD backlight
+  #   output: light_lcd_gpio
+  #   initial_state: 
+  #     brightness: 100%
+  #   restore_mode: ALWAYS_ON
+  - platform: binary
+    id: component_light_lcd_binary
+    name: LCD Backlight (Binary)
+    output: component_output_light_lcd_gpio
+    initial_state: 
+      brightness: 1
+    restore_mode: ALWAYS_ON 
+
+# some configuation done here, but not all
+# sx126x:
+#   dio1_pin: GPIO14
+#   cs_pin: GPIO23
+#   busy_pin: GPIO19
+#   rst_pin:
+#     pi4ioe5v6408: expander_p0 # doesn't support expander, so will have to be done manually?
+#     number: 7
+#   pa_power: 22
+#   # bandwidth: 125_0kHz
+#   crc_enable: true
+#   frequency: 433920000 # what should we use?
+#   modulation: LORA
+#   hw_version: sx1262
+#   rf_switch: true
+#   sync_value: [0x14, 0x24]
+#   preamble_size: 8
+#   spreading_factor: 7
+#   coding_rate: CR_4_6
+#   tcxo_voltage: 1_8V
+#   tcxo_delay: 5ms
+    
+touchscreen:
+  - id: component_touchscreen
+    platform: ft63x6
+    i2c_id: component_i2c0
+    display: component_display
+    address: 0x38
+    # interrupt_pin: # seems to never send an interrupt, so no touch events are recorded
+    #   number: GPIO3
+    #   allow_other_uses: True
+    # on_touch:
+    #   - lambda: |-
+    #       ESP_LOGI("touchscreen", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
+    #           touch.x,
+    #           touch.y,
+    #           touch.x_raw,
+    #           touch.y_raw
+    #           );
+    # on_update:
+    #   - lambda: |-
+    #       for (auto touch: touches)  {
+    #           if (touch.state <= 2) {
+    #             ESP_LOGI("touchscreen", "id=%d x=%d, y=%d", touch.id, touch.x, touch.y);
+    #           }
+    #       }
+    # on_release: 
+    #   - lambda: |-
+    #       ESP_LOGI("touchscreen", "released");
+
+display:
+  - id: component_display
+    platform: mipi_spi
+    model: ST7789V
+    dimensions:
+      height: 240
+      width: 135
+      offset_height: 40
+      offset_width: 52
+    cs_pin: GPIO17
+    dc_pin: GPIO16
+    invert_colors: true
+    update_interval: 50ms
+    reset_pin:
+      pi4ioe5v6408: component_expander_p1
+      number: 1
+      mode:
+        output: true
+    lambda: |-
+      auto black = Color(0, 0, 0);
+      auto red = Color(255, 0, 0);
+      auto green = Color(0, 255, 0);
+      auto blue = Color(0, 0, 255);
+      auto white = Color(255, 255, 255);
+      it.fill(id(color_bg));
+      // it.print(0, 0, id(font_standard), id(color_green), "Hello ST7789!");
+      it.printf(0, 0, id(font_standard), black, "%.1fV", id(component_batt_voltage).state);
+      it.filled_circle(it.get_width() / 2, it.get_height() / 2, 50, id(color_purple));
+      it.filled_circle((it.get_width() / 2) - 40, 32, 15, black);
+      it.filled_circle((it.get_width() / 2) - 20, 32, 15, red);
+      it.filled_circle((it.get_width() / 2), 32, 15, green);
+      it.filled_circle((it.get_width() / 2) + 20, 32, 15, blue);
+      it.filled_circle((it.get_width() / 2) + 40, 32, 15, white);
+      
+      auto touch = id(component_touchscreen)->get_touch();
+      if (touch) {// or touch.has_value()
+        it.filled_circle(touch.value().x, touch.value().y, 10, white);
+      }
+
+font:
+  - id: font_standard
+    file: "gfonts://Roboto"
+    size: 14
+
+color:
+  - id: color_bg
+    red_int: 226
+    green_int: 77
+    blue_int: 2
+  - id: color_red
+    red: 100%
+    green: 0
+    blue: 0
+  - id: color_green
+    red: 0
+    green: 100%
+    blue: 0
+  - id: color_blue
+    red: 0
+    green: 0
+    blue: 100%
+  - id: color_purple
+    red_int: 77
+    green_int: 2
+    blue_int: 226
