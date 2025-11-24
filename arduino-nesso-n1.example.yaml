@@ -59,7 +59,7 @@ web_server:
 
 i2c:
   - id: component_i2c0
-    scl: GPIO8
+    scl: GPIO8 # warns about strapping pin; is what it is
     sda: GPIO10
 
 spi:
@@ -83,6 +83,14 @@ i2c_device:
   - id: component_charge_controller
     address: 0x49
     i2c_id: component_i2c0
+  # does nothing right now, but this is where the BMI270 6 axis IMU is
+  - id: component_imu0
+    address: 0x68
+    i2c_id: component_i2c0
+  # does nothing right now, but this is where the BMI270 6 axis IMU is (docs says it has 2x addresses)
+  - id: component_imu1
+    address: 0x69
+    i2c_id: component_i2c0
 
 output:
   - platform: gpio # couldn't get ledc to work for pwm, because of the expander
@@ -95,6 +103,31 @@ output:
   - id: component_output_buzzer
     platform: ledc
     pin: GPIO11
+  - id: component_output_led_green_gpio
+    platform: gpio # also couldn't find a way to get PWM to work for this LED over the expander, despite Nesso N1's documentation suggesting it should be posible. I'm guessing the expander library OR the LEDC library just doesn't work for it.
+    pin:
+      pi4ioe5v6408: component_expander_p1
+      number: 7
+      inverted: true
+      mode:
+        output: true
+
+
+remote_transmitter:
+  id: component_ir_transmitter
+  pin: GPIO9 # warns about strapping pin; safe because its used for output with a high impedance device
+  # Infrared remotes use a 50% carrier signal (copied from esphome documentation)
+  carrier_duty_percent: 50%
+
+button:
+  - platform: template
+    id: component_ir_sony_power_on
+    name: IR - Sony - Power On
+    on_press:
+      # from: https://community.home-assistant.io/t/extracting-sony-ir-transmitter-pronto-codes-for-sony-str-db930-guide/784161
+      - remote_transmitter.transmit_pronto:
+          transmitter_id: component_ir_transmitter
+          data: "0000 0066 0000 000d 005f 0018 0018 0018 0030 0018 0030 0018 0030 0018 0018 0018 0030 0018 0018 0018 0018 0017 0018 0018 0018 0017 0018 0018 002f 0429"
 
 binary_sensor:
   - id: component_button_front
@@ -106,25 +139,28 @@ binary_sensor:
         input: true
         pullup: true
       inverted: true
-    on_press: 
-      while:
-        condition:
-          binary_sensor.is_on: component_button_front
-        then:
+    on_press:
+      - then:
+        - light.turn_on: component_light_lcd_binary
         - output.turn_on: component_output_buzzer
-        - output.ledc.set_frequency:
-            id: component_output_buzzer
-            frequency: "1000Hz"
-        - output.set_level:
-            id: component_output_buzzer
-            level: 50%
-        - delay: 0.5s
-        - output.ledc.set_frequency:
-            id: component_output_buzzer
-            frequency: "500Hz"
-        - output.set_level:
-            id: component_output_buzzer
-            level: 100%
+        - while:
+            condition:
+              binary_sensor.is_on: component_button_front
+            then:
+            - output.ledc.set_frequency:
+                id: component_output_buzzer
+                frequency: "1000Hz"
+            - output.set_level:
+                id: component_output_buzzer
+                level: 50%
+            - delay: 0.5s
+            - output.ledc.set_frequency:
+                id: component_output_buzzer
+                frequency: "500Hz"
+            - output.set_level:
+                id: component_output_buzzer
+                level: 100%
+        - output.turn_off: component_output_buzzer
   - id: component_button_side
     platform: gpio
     pin:
@@ -136,6 +172,7 @@ binary_sensor:
       inverted: true
     on_press: 
       then:
+        - light.turn_off: component_light_lcd_binary
         - output.turn_off: component_output_buzzer
 
 sensor:
@@ -187,7 +224,12 @@ light:
     output: component_output_light_lcd_gpio
     initial_state: 
       brightness: 1
-    restore_mode: ALWAYS_ON 
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: binary # wanted monochromatic, but see output pin configuration for more detail
+    id: component_led_green
+    name: Green LED
+    output: component_output_led_green_gpio
+    restore_mode: RESTORE_DEFAULT_OFF
 
 # some configuation done here, but not all
 # sx126x:
